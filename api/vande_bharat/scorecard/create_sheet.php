@@ -1,0 +1,162 @@
+<?php
+header("Access-Control-Allow-Origin: *");
+header("Content-Type: application/json; charset=UTF-8");
+header("Access-Control-Allow-Methods: POST");
+header("Access-Control-Max-Age: 3600");
+header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
+
+require_once '../../../connection.php';
+require_once __DIR__ . '/../../datetime_logic/railway_date.php';
+global $pdo;
+
+// Get posted data
+$data = json_decode(file_get_contents("php://input"), true);
+
+// If JSON decoding fails, try standard $_POST
+if (empty($data)) {
+    $data = $_POST;
+}
+
+$auditorName = $data['auditor_name'] ?? null;
+$auditorId = isset($data['auditor_id']) && !empty($data['auditor_id']) ? intval($data['auditor_id']) : null;
+$trainNo = $data['train_no'] ?? null;
+$stationId = isset($data['station_id']) ? intval($data['station_id']) : 1;
+$explicitDate = $data['report_date'] ?? ($data['date'] ?? null);
+$reportDate = getRailwayOperatingDate($explicitDate);
+$createdAt = getReportCreatedAt($explicitDate);
+$coachNos = $data['coach_nos'] ?? null; // Expect array of coach numbers or comma-separated string
+
+if (empty($auditorName) || empty($trainNo) || empty($coachNos)) {
+    http_response_code(400);
+    echo json_encode([
+        "status" => "error",
+        "message" => "Incomplete data. auditor_name, train_no, and coach_nos are required."
+    ]);
+    exit();
+}
+
+// Convert coachNos to array if sent as comma-separated string
+if (!is_array($coachNos)) {
+    $coachNos = array_filter(array_map('trim', explode(',', $coachNos)));
+}
+
+try {
+    // 1. Fetch active parameters and subparameters
+    $paramsStmt = $pdo->prepare("
+        SELECT sp.id AS sub_parameter_id
+        FROM mcc_vb_scorecard_param p
+        JOIN mcc_vb_scorecard_sub_param sp ON p.id = sp.parameter_id
+        WHERE p.station_id = ? AND sp.station_id = ? 
+        AND p.status = 'Active' AND sp.status = 'Active'
+        ORDER BY p.id ASC, sp.id ASC
+    ");
+    $paramsStmt->execute([$stationId, $stationId]);
+    $subParams = $paramsStmt->fetchAll(PDO::FETCH_COLUMN);
+
+    // Fetch chemical parameters for the station - Vande Bharat (type_id = 5)
+    $chemParamsStmt = $pdo->prepare("
+        SELECT p.id 
+        FROM mcc_chemical_param p
+        JOIN mcc_chemical_param_type_map m ON p.id = m.parameter_id AND m.station_id = p.station_id
+        WHERE p.station_id = :station_id AND m.chemical_type_id = 5 AND p.status = 'Active' AND m.status = 'Active'
+        ORDER BY p.id ASC
+    ");
+    $chemParamsStmt->execute(['station_id' => $stationId]);
+    $chemParams = $chemParamsStmt->fetchAll(PDO::FETCH_COLUMN);
+
+    if (empty($subParams)) {
+        http_response_code(400);
+        echo json_encode([
+            "status" => "error",
+            "message" => "No active scorecard parameters found for station_id " . $stationId
+        ]);
+        exit();
+    }
+
+    // 2. Generate unique token_id
+    $datePart = date('Ymd', strtotime($reportDate));
+    $randPart = sprintf("%03d", rand(1, 999));
+    $tokenId = "TKN-" . $datePart . "-" . $randPart;
+
+    // Verify uniqueness of generated token
+    $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM mcc_vb_scorecard_report WHERE token_id = ?");
+    $checkStmt->execute([$tokenId]);
+    while ($checkStmt->fetchColumn() > 0) {
+        $randPart = sprintf("%03d", rand(1, 999));
+        $tokenId = "TKN-" . $datePart . "-" . $randPart;
+        $checkStmt->execute([$tokenId]);
+    }
+
+    // 3. Insert initial scorecard records (all scores set to NULL)
+    $pdo->beginTransaction();
+
+    $insertStmt = $pdo->prepare("
+        INSERT INTO mcc_vb_scorecard_report 
+        (sub_parameter_id, station_id, token_id, train_no, coach_no, score_value, auditor_name, audit_by, report_date, created_at)
+        VALUES (:sub_parameter_id, :station_id, :token_id, :train_no, :coach_no, '', :auditor_name, :audit_by, :report_date, :created_at)
+    ");
+
+    foreach ($coachNos as $coachNo) {
+        foreach ($subParams as $subParamId) {
+            $insertStmt->execute([
+                'sub_parameter_id' => $subParamId,
+                'station_id' => $stationId,
+                'token_id' => $tokenId,
+                'train_no' => $trainNo,
+                'coach_no' => trim($coachNo),
+                'auditor_name' => $auditorName,
+                'audit_by' => $auditorId,
+                'report_date' => $reportDate,
+                'created_at' => $createdAt
+            ]);
+        }
+    }
+
+    // 4. Insert initial chemical report records (all quantities set to NULL) - Vande Bharat (type_id = 5)
+    if (!empty($chemParams)) {
+        $insertChemStmt = $pdo->prepare("
+            INSERT INTO mcc_chemical_report 
+            (chemical_type_id, parameter_id, coach_no, qty_used, auditor_name, station_id, token_id, train_no, audit_by, report_date, created_at)
+            VALUES (5, :parameter_id, :coach_no, NULL, :auditor_name, :station_id, :token_id, :train_no, :audit_by, :report_date, :created_at)
+        ");
+
+        foreach ($coachNos as $coachNo) {
+            foreach ($chemParams as $paramId) {
+                $insertChemStmt->execute([
+                    'parameter_id' => $paramId,
+                    'coach_no' => trim($coachNo),
+                    'auditor_name' => $auditorName,
+                    'station_id' => $stationId,
+                    'token_id' => $tokenId,
+                    'train_no' => $trainNo,
+                    'audit_by' => $auditorId,
+                    'report_date' => $reportDate,
+                    'created_at' => $createdAt
+                ]);
+            }
+        }
+    }
+
+    $pdo->commit();
+
+    http_response_code(201);
+    echo json_encode([
+        "status" => "success",
+        "message" => "Vande Bharat cleaning scorecard sheet initialized successfully.",
+        "token_id" => $tokenId,
+        "train_no" => $trainNo,
+        "report_date" => $reportDate,
+        "created_at" => $createdAt,
+        "coaches_count" => count($coachNos)
+    ]);
+
+} catch (Exception $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    http_response_code(500);
+    echo json_encode([
+        "status" => "error",
+        "message" => "Database error: " . $e->getMessage()
+    ]);
+}
