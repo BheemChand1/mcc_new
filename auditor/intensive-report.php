@@ -609,6 +609,10 @@ include 'sidebar.php';
                                     <span>Watering Score :</span>
                                     <?= $sheet['watering_percentage'] ?> %
                                 </div>
+                                <div class="meta-item">
+                                    <span>Total Score :</span>
+                                    <?= number_format(($sheet['internal_percentage'] + $sheet['external_percentage'] + $sheet['watering_percentage']) / 3, 1) ?> %
+                                </div>
                             </div>
                         </div>
 
