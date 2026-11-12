@@ -81,6 +81,26 @@ $hasPrt       = in_array('prt_cleaning', $activeAppKeys) || in_array(4, $activeR
 $hasPantry    = in_array('pantry_car', $activeAppKeys) || in_array(5, $activeReportIds) || in_array('intensive_pantry_scorecard.php', $activeSubreportUrls);
 $hasVande     = in_array('vande_bharat_modules', $activeAppKeys) || in_array(7, $activeReportIds) || in_array('vande-bharat-report.php', $activeSubreportUrls);
 
+// Score-card sources must follow the station's assigned subreports. A parent
+// module assignment alone must not make every chemical/machine/manpower score
+// contribute to the overall cards.
+$hasNormalChem = in_array('chemical-report.php', $activeSubreportUrls, true);
+$hasIntensiveChem = in_array('intensive-chemical-report.php', $activeSubreportUrls, true);
+$hasPrtChem = in_array('Platform-Return-Chemical.php', $activeSubreportUrls, true);
+$hasDcChem = in_array('dc-chemical.php', $activeSubreportUrls, true);
+$hasPantryChem = in_array('pantry-chemical.php', $activeSubreportUrls, true);
+$hasVandeChem = in_array('vande-bharat-chemical.php', $activeSubreportUrls, true);
+
+$hasNormalMachine = in_array('machine-report.php', $activeSubreportUrls, true);
+$hasIntensiveMachine = in_array('machine-report-intensive.php', $activeSubreportUrls, true);
+$hasPrtMachine = in_array('Platform-Return-Machine.php', $activeSubreportUrls, true);
+$hasDcMachine = in_array('dc-machine.php', $activeSubreportUrls, true);
+$hasPantryMachine = in_array('pantry-machine.php', $activeSubreportUrls, true);
+$hasVandeMachine = in_array('vande-bharat-machine.php', $activeSubreportUrls, true);
+
+$hasManpowerScore = in_array('man-power-log.php', $activeSubreportUrls, true)
+    || in_array('biometeric_manpower_log.php', $activeSubreportUrls, true);
+
 // Detect which intensive scorecard table is configured (scorecard 1 vs scorecard 2)
 $intensiveTable = (in_array('intensive-report.php', $activeSubreportUrls) && !in_array('intensive_scorecard_2.php', $activeSubreportUrls))
     ? 'mcc_intensive_scorecard_report'
@@ -195,22 +215,22 @@ foreach ($categories as $key => $cat) {
 /* 2. OVERALL CHEMICAL SCORE (qty_used vs target qty)                 */
 /* ------------------------------------------------------------------ */
 $chemicalPairs = [];
-if ($hasNormal) {
+if ($hasNormalChem) {
     $chemicalPairs[] = ['mcc_normal_chemical_report', 'mcc_normal_chemical_target'];
 }
-if ($hasIntensive) {
+if ($hasIntensiveChem) {
     $chemicalPairs[] = ['mcc_intensive_chemical_report', 'mcc_intensive_chemical_target'];
 }
-if ($hasPrt) {
+if ($hasPrtChem) {
     $chemicalPairs[] = ['mcc_prt_chemical_report', 'mcc_prt_chemical_target'];
 }
-if ($hasDc) {
+if ($hasDcChem) {
     $chemicalPairs[] = ['dc_mcc_chemical_report', 'dc_mcc_chemical_target'];
 }
-if ($hasPantry) {
+if ($hasPantryChem) {
     $chemicalPairs[] = ['mcc_intensive_pantry_chemical_report', 'mcc_intensive_pantry_chemical_target'];
 }
-if ($hasVande) {
+if ($hasVandeChem) {
     $chemicalPairs[] = ['mcc_vb_chemical_report', 'mcc_vb_chemical_target'];
 }
 
@@ -256,22 +276,22 @@ $chemicalScorePrev = $chemActivePrev ? round(array_sum($chemActivePrev) / count(
 /* 3. OVERALL MACHINE SCORE (used_status Y compliance)                */
 /* ------------------------------------------------------------------ */
 $machineTables = [];
-if ($hasNormal) {
+if ($hasNormalMachine) {
     $machineTables[] = 'mcc_normal_machine_report';
 }
-if ($hasIntensive) {
+if ($hasIntensiveMachine) {
     $machineTables[] = 'mcc_intensive_machine_report';
 }
-if ($hasDc) {
+if ($hasDcMachine) {
     $machineTables[] = 'dc_mcc_machine_report';
 }
-if ($hasPrt) {
+if ($hasPrtMachine) {
     $machineTables[] = 'mcc_prt_machine_report';
 }
-if ($hasPantry) {
+if ($hasPantryMachine) {
     $machineTables[] = 'mcc_intensive_pantry_machine_report';
 }
-if ($hasVande) {
+if ($hasVandeMachine) {
     $machineTables[] = 'mcc_vb_machine_report';
 }
 
@@ -307,7 +327,7 @@ $machineScorePrev = $machActivePrev ? round(array_sum($machActivePrev) / count($
 /* ------------------------------------------------------------------ */
 $manpowerScore = 0.0; $manpowerScorePrev = 0.0;
 $manpowerPresent = 0; $manpowerTarget = 0;
-try {
+if ($hasManpowerScore) try {
     $mpStmt = $pdo->prepare("
         SELECT SUM(provided) AS total_provided, SUM(absent) AS total_absent
         FROM mcc_manpower_log
@@ -691,31 +711,32 @@ include 'sidebar.php';
       <section class="mccx-score-row" style="grid-area:score">
         <?php
         $scores = [
-            [
+            $chemicalPairs ? [
                 'label' => 'Overall Chemical Score',
                 'value' => $chemicalScore,
                 'prev'  => $chemicalScorePrev,
                 'icon'  => 'bi-droplet-half',
                 'bar'   => 'linear-gradient(90deg,#0fd68b,#22e07c)',
                 'cls'   => 'chem',
-            ],
-            [
+            ] : null,
+            $machineTables ? [
                 'label' => 'Overall Machine Score',
                 'value' => $machineScore,
                 'prev'  => $machineScorePrev,
                 'icon'  => 'bi-gear-wide-connected',
                 'bar'   => 'linear-gradient(90deg,#845ec2,#a55eea)',
                 'cls'   => 'machine',
-            ],
-            [
+            ] : null,
+            $hasManpowerScore ? [
                 'label' => 'Overall Manpower Score',
                 'value' => $manpowerScore,
                 'prev'  => $manpowerScorePrev,
                 'icon'  => 'bi-people-fill',
                 'bar'   => 'linear-gradient(90deg,#ff9642,#ffaa2b)',
                 'cls'   => 'man',
-            ],
+            ] : null,
         ];
+        $scores = array_values(array_filter($scores));
         foreach ($scores as $sc):
             $d  = $mccPctDelta($sc['value'], $sc['prev']);
             $up = $d >= 0;
