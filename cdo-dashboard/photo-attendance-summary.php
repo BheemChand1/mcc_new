@@ -70,7 +70,7 @@ for ($d = 1; $d <= $daysInMonth; $d++) {
 }
 
 $empSummary = [];
-$employeeStmt = $pdo->prepare("\n    SELECT employee_id, full_name, designation, employee_photo\n    FROM mcc_employee\n    WHERE station_id = :station_id\n      AND (status IS NULL OR status = '' OR status = 'Active')\n    ORDER BY CAST(employee_id AS UNSIGNED), full_name\n");
+$employeeStmt = $pdo->prepare("SELECT employee_id, full_name, designation, employee_photo, custom_data FROM mcc_employee WHERE station_id = :station_id AND (status IS NULL OR status = '' OR status = 'Active') ORDER BY CAST(employee_id AS UNSIGNED), full_name");
 $employeeStmt->execute(['station_id' => $stationId]);
 $employeeMaster = $employeeStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -78,10 +78,13 @@ $employeeMaster = $employeeStmt->fetchAll(PDO::FETCH_ASSOC);
 // attendance are still shown as absent for every calendar day.
 foreach ($employeeMaster as $employee) {
     $employeeId = (string)$employee['employee_id'];
+    $customData = !empty($employee['custom_data']) ? json_decode($employee['custom_data'], true) : [];
+    $category = $customData['category'] ?? $customData['Category'] ?? $customData['department'] ?? $customData['Department'] ?? '-';
     $empSummary[$employeeId] = [
         'emp_id' => $employeeId,
         'name' => $employee['full_name'] ?: $employeeId,
         'designation' => $employee['designation'] ?: 'Staff',
+        'category' => $category,
         'master_photo' => $employee['employee_photo'] ?? null,
         'days_present' => 0,
         'days' => array_fill(1, $daysInMonth, 'A'),
@@ -160,6 +163,7 @@ foreach ($monthlyLogs as $log) {
             'emp_id' => $empId,
             'name' => $log['employee_name'],
             'designation' => $log['designation'],
+            'category' => '-',
             'master_photo' => $log['master_photo'],
             'days_present' => 0,
             'days' => array_fill(1, $daysInMonth, 'A'),
@@ -202,6 +206,28 @@ $totalHoursLogged = round($totalSecondsWorked / 3600, 1);
 $activeDaysCount = count(array_filter($daySummary, function($d) { return $d['total_present'] > 0; }));
 $avgDailyStaff = $activeDaysCount > 0 ? round($totalMonthlyPunches / $activeDaysCount, 1) : 0;
 $compliancePercent = $totalMonthlyPunches > 0 ? round((($totalInPhotos + $totalOutPhotos) / ($totalMonthlyPunches * 2)) * 100, 1) : 100;
+
+// Excel-compatible export of the employee/day matrix.
+if (isset($_GET['export']) && $_GET['export'] === 'excel') {
+    $fileMonth = str_replace(' ', '_', $summaryMonthDisplay);
+    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="photo_attendance_' . $fileMonth . '.xls"');
+    echo "\xEF\xBB\xBF";
+    echo '<table border="1"><thead><tr>';
+    echo '<th>EMP ID</th><th>Emp Name</th><th>Designation</th><th>Category</th>';
+    for ($d = 1; $d <= $daysInMonth; $d++) echo '<th>' . $d . '</th>';
+    echo '<th>WD</th></tr></thead><tbody>';
+    foreach ($empSummary as $employee) {
+        echo '<tr><td>' . htmlspecialchars($employee['emp_id']) . '</td>';
+        echo '<td>' . htmlspecialchars($employee['name']) . '</td>';
+        echo '<td>' . htmlspecialchars($employee['designation']) . '</td>';
+        echo '<td>' . htmlspecialchars($employee['category']) . '</td>';
+        for ($d = 1; $d <= $daysInMonth; $d++) echo '<td>' . ($employee['days'][$d] ?? 'A') . '</td>';
+        echo '<td>' . (int)$employee['days_present'] . '</td></tr>';
+    }
+    echo '</tbody></table>';
+    exit;
+}
 
 include 'header.php';
 include 'sidebar.php';
@@ -605,6 +631,9 @@ include 'sidebar.php';
             <button type="button" class="btn-print-action" onclick="window.print()">
               <i class="bi bi-printer-fill"></i> Print Summary
             </button>
+            <a class="btn-back-link no-print" href="?month=<?= urlencode($selectedMonth) ?>&year=<?= urlencode($selectedYear) ?>&export=excel" title="Download employee attendance in Excel format">
+              <i class="bi bi-file-earmark-excel-fill text-success"></i> Export Excel
+            </a>
           </form>
         </div>
 
@@ -732,6 +761,7 @@ include 'sidebar.php';
                     <th style="width: 110px;">EMP ID</th>
                     <th style="min-width: 220px; text-align: left; padding-left: 16px;">Emp Name</th>
                     <th style="width: 140px;">Designation</th>
+                    <th style="width: 130px;">Category</th>
                     <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
                       <th style="min-width: 38px;"><?= $d ?></th>
                     <?php endfor; ?>
@@ -758,6 +788,7 @@ include 'sidebar.php';
                           <?= htmlspecialchars($emp['name']) ?>
                         </td>
                         <td><span class="text-secondary fw-semibold"><?= htmlspecialchars($emp['designation']) ?></span></td>
+                        <td><span class="text-secondary fw-semibold"><?= htmlspecialchars($emp['category'] ?? '-') ?></span></td>
                         <?php for ($d = 1; $d <= $daysInMonth; $d++):
                             $status = $emp['days'][$d] ?? 'A';
                             $isPresent = ($status === 'P');
