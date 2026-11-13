@@ -81,6 +81,42 @@
             }
         });
     });
+
+    // Add token-based sheet deletion beside every editor "Edit Sheet" action.
+    // The endpoint performs the final report-family and station validation.
+    document.addEventListener('DOMContentLoaded', function () {
+        const currentReport = window.location.pathname.split('/').pop();
+        document.querySelectorAll('a[title="Edit Sheet"]').forEach(function (editLink) {
+            const editUrl = new URL(editLink.href, window.location.href);
+            const tokenId = editUrl.searchParams.get('edit');
+            if (!tokenId || editUrl.searchParams.has('edit_date')) return;
+
+            const deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'btn btn-sm btn-danger fw-bold text-white no-print shadow-sm px-3 ms-1';
+            deleteButton.title = 'Delete Sheet';
+            deleteButton.innerHTML = '<i class="bi bi-trash me-1"></i> Delete Sheet';
+            deleteButton.addEventListener('click', async function () {
+                if (!window.confirm('Delete this complete sheet and all its report data? This cannot be undone.')) return;
+                deleteButton.disabled = true;
+                try {
+                    const body = new URLSearchParams({ token_id: tokenId, report_key: currentReport });
+                    const response = await fetch('delete-sheet.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                        body: body.toString()
+                    });
+                    const result = await response.json();
+                    if (!result.success) throw new Error(result.message || 'Delete failed.');
+                    window.location.reload();
+                } catch (error) {
+                    window.alert(error.message || 'Unable to delete the sheet.');
+                    deleteButton.disabled = false;
+                }
+            });
+            editLink.insertAdjacentElement('afterend', deleteButton);
+        });
+    });
     </script>
 </body>
 </html>
