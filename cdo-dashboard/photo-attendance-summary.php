@@ -32,10 +32,12 @@ $sql = "
         END AS dynamic_shift
     FROM mcc_photo_attendance p
     LEFT JOIN mcc_employee e ON p.employee_id = e.employee_id
-    WHERE p.attendance_date BETWEEN :start_date AND :end_date
+    WHERE p.station_id = :station_id
+      AND p.attendance_date BETWEEN :start_date AND :end_date
     ORDER BY p.attendance_date ASC, p.in_time ASC
 ";
 $params = [
+    'station_id' => $stationId,
     'start_date' => $firstDayOfMonth,
     'end_date' => $lastDayOfMonth
 ];
@@ -68,6 +70,31 @@ for ($d = 1; $d <= $daysInMonth; $d++) {
 }
 
 $empSummary = [];
+$employeeStmt = $pdo->prepare("\n    SELECT employee_id, full_name, designation, employee_photo\n    FROM mcc_employee\n    WHERE station_id = :station_id\n      AND (status IS NULL OR status = '' OR status = 'Active')\n    ORDER BY CAST(employee_id AS UNSIGNED), full_name\n");
+$employeeStmt->execute(['station_id' => $stationId]);
+$employeeMaster = $employeeStmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Build the monthly matrix from the employee master so employees with no
+// attendance are still shown as absent for every calendar day.
+foreach ($employeeMaster as $employee) {
+    $employeeId = (string)$employee['employee_id'];
+    $empSummary[$employeeId] = [
+        'emp_id' => $employeeId,
+        'name' => $employee['full_name'] ?: $employeeId,
+        'designation' => $employee['designation'] ?: 'Staff',
+        'master_photo' => $employee['employee_photo'] ?? null,
+        'days_present' => 0,
+        'days' => array_fill(1, $daysInMonth, 'A'),
+        'shift1_count' => 0,
+        'shift2_count' => 0,
+        'shift3_count' => 0,
+        'total_seconds' => 0,
+        'in_photos_count' => 0,
+        'out_photos_count' => 0,
+        'processes' => [],
+        '_days_seen' => []
+    ];
+}
 $totalMonthlyPunches = count($monthlyLogs);
 $totalSecondsWorked = 0;
 $totalInPhotos = 0;
@@ -135,6 +162,7 @@ foreach ($monthlyLogs as $log) {
             'designation' => $log['designation'],
             'master_photo' => $log['master_photo'],
             'days_present' => 0,
+            'days' => array_fill(1, $daysInMonth, 'A'),
             'shift1_count' => 0,
             'shift2_count' => 0,
             'shift3_count' => 0,
@@ -144,7 +172,11 @@ foreach ($monthlyLogs as $log) {
             'processes' => []
         ];
     }
-    $empSummary[$empId]['days_present']++;
+    if ($day >= 1 && $day <= $daysInMonth && empty($empSummary[$empId]['_days_seen'][$day])) {
+        $empSummary[$empId]['_days_seen'][$day] = true;
+        $empSummary[$empId]['days'][$day] = 'P';
+        $empSummary[$empId]['days_present']++;
+    }
     if ($shift === 'Shift 1') $empSummary[$empId]['shift1_count']++;
     elseif ($shift === 'Shift 2') $empSummary[$empId]['shift2_count']++;
     elseif ($shift === 'Shift 3') $empSummary[$empId]['shift3_count']++;
@@ -153,6 +185,11 @@ foreach ($monthlyLogs as $log) {
     if ($hasOutPhoto) $empSummary[$empId]['out_photos_count']++;
     $empSummary[$empId]['processes'][$proc] = ($empSummary[$empId]['processes'][$proc] ?? 0) + 1;
 }
+
+foreach ($empSummary as &$employeeSummary) {
+    unset($employeeSummary['_days_seen']);
+}
+unset($employeeSummary);
 
 // Compute total present per day
 foreach ($daySummary as $d => $data) {
@@ -692,20 +729,19 @@ include 'sidebar.php';
                 <thead>
                   <tr class="main-th">
                     <th style="width: 50px;">#</th>
-                    <th style="width: 140px;">Emp ID</th>
-                    <th style="width: 250px; text-align: left; padding-left: 16px;">Staff Name</th>
-                    <th style="width: 160px;">Designation</th>
-                    <th style="width: 130px;">Days Present</th>
-                    <th style="width: 100px;">Shift 1</th>
-                    <th style="width: 100px;">Shift 2</th>
-                    <th style="width: 100px;">Shift 3</th>
-                    <th style="width: 130px;">Total Hours</th>
+                    <th style="width: 110px;">EMP ID</th>
+                    <th style="min-width: 220px; text-align: left; padding-left: 16px;">Emp Name</th>
+                    <th style="width: 140px;">Designation</th>
+                    <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
+                      <th style="min-width: 38px;"><?= $d ?></th>
+                    <?php endfor; ?>
+                    <th style="width: 65px;">WD</th>
                   </tr>
                 </thead>
                 <tbody>
                   <?php if (empty($empSummary)): ?>
                     <tr>
-                      <td colspan="9" style="padding: 30px; text-align: center; color: #64748b;">
+                      <td colspan="<?= $daysInMonth + 5 ?>" style="padding: 30px; text-align: center; color: #64748b;">
                         No staff attendance records logged for this month.
                       </td>
                     </tr>
@@ -722,15 +758,15 @@ include 'sidebar.php';
                           <?= htmlspecialchars($emp['name']) ?>
                         </td>
                         <td><span class="text-secondary fw-semibold"><?= htmlspecialchars($emp['designation']) ?></span></td>
-                        <td>
-                          <span class="badge bg-primary text-white px-2 py-1 fs-6">
-                            <?= $emp['days_present'] ?> / <?= $daysInMonth ?>
-                          </span>
-                        </td>
-                        <td><span class="badge-shift s1"><?= $emp['shift1_count'] ?></span></td>
-                        <td><span class="badge-shift s2"><?= $emp['shift2_count'] ?></span></td>
-                        <td><span class="badge-shift s3"><?= $emp['shift3_count'] ?></span></td>
-                        <td><strong><?= $empHours ?> hrs</strong></td>
+                        <?php for ($d = 1; $d <= $daysInMonth; $d++):
+                            $status = $emp['days'][$d] ?? 'A';
+                            $isPresent = ($status === 'P');
+                        ?>
+                          <td style="font-weight: 800; color: <?= $isPresent ? '#15803d' : '#dc2626' ?>; background: <?= $isPresent ? '#f0fdf4' : '#fef2f2' ?>;">
+                            <?= $status ?>
+                          </td>
+                        <?php endfor; ?>
+                        <td><strong class="text-primary"><?= $emp['days_present'] ?></strong></td>
                       </tr>
                     <?php endforeach; ?>
                   <?php endif; ?>
