@@ -216,41 +216,49 @@ foreach ($categories as $key => $cat) {
 /* ------------------------------------------------------------------ */
 $chemicalPairs = [];
 if ($hasNormalChem) {
-    $chemicalPairs[] = ['mcc_normal_chemical_report', 'mcc_normal_chemical_target'];
+    $chemicalPairs[] = ['mcc_normal_chemical_report', 'mcc_chemical_target', 1];
 }
 if ($hasIntensiveChem) {
-    $chemicalPairs[] = ['mcc_intensive_chemical_report', 'mcc_intensive_chemical_target'];
+    $chemicalPairs[] = ['mcc_intensive_chemical_report', 'mcc_chemical_target', 2];
 }
 if ($hasPrtChem) {
-    $chemicalPairs[] = ['mcc_prt_chemical_report', 'mcc_prt_chemical_target'];
+    $chemicalPairs[] = ['mcc_prt_chemical_report', 'mcc_chemical_target', 4];
 }
 if ($hasDcChem) {
-    $chemicalPairs[] = ['dc_mcc_chemical_report', 'dc_mcc_chemical_target'];
+    $chemicalPairs[] = ['dc_mcc_chemical_report', 'mcc_chemical_target', 6];
 }
 if ($hasPantryChem) {
-    $chemicalPairs[] = ['mcc_intensive_pantry_chemical_report', 'mcc_intensive_pantry_chemical_target'];
+    $chemicalPairs[] = ['mcc_intensive_pantry_chemical_report', 'mcc_chemical_target', 3];
 }
 if ($hasVandeChem) {
-    $chemicalPairs[] = ['mcc_vb_chemical_report', 'mcc_vb_chemical_target'];
+    $chemicalPairs[] = ['mcc_vb_chemical_report', 'mcc_chemical_target', 5];
 }
 
-$mccChem = function (string $reportTable, string $targetTable, string $from, string $to) use ($pdo, $stationId): float {
+$mccChem = function (string $reportTable, string $targetTable, int $chemicalTypeId, string $from, string $to) use ($pdo, $stationId): float {
     $sqls = [
         "SELECT COALESCE(SUM(r.qty_used), 0) AS used, COALESCE(SUM(t.`qty(ml)`), 0) AS tgt
            FROM {$reportTable} r
            JOIN {$targetTable} t ON t.parameter_id = r.parameter_id AND t.station_id = r.station_id
+            AND t.chemical_type_id = :chemical_type_id
             AND t.effective_from <= r.report_date AND (t.effective_to IS NULL OR t.effective_to >= r.report_date)
           WHERE r.station_id = :sid AND r.report_date BETWEEN :f AND :t",
         "SELECT COALESCE(SUM(r.qty_used), 0) AS used, COALESCE(SUM(t.`qty(ml)`), 0) AS tgt
            FROM {$reportTable} r
            JOIN {$targetTable} t ON t.parameter_id = r.parameter_id AND t.station_id = r.station_id
-            AND t.id IN (SELECT MAX(x.id) FROM {$targetTable} x WHERE x.station_id = r.station_id GROUP BY x.parameter_id)
+            AND t.chemical_type_id = :chemical_type_id
+            AND t.id IN (SELECT MAX(x.id) FROM {$targetTable} x WHERE x.station_id = r.station_id AND x.chemical_type_id = :chemical_type_id_sub GROUP BY x.parameter_id)
           WHERE r.station_id = :sid AND r.report_date BETWEEN :f AND :t",
     ];
     foreach ($sqls as $sql) {
         try {
             $st = $pdo->prepare($sql);
-            $st->execute([':sid' => $stationId, ':f' => $from, ':t' => $to]);
+            $st->execute([
+                ':sid' => $stationId,
+                ':chemical_type_id' => $chemicalTypeId,
+                ':chemical_type_id_sub' => $chemicalTypeId,
+                ':f' => $from,
+                ':t' => $to,
+            ]);
             $r   = $st->fetch(PDO::FETCH_ASSOC);
             $used = floatval($r['used'] ?? 0);
             $tgt  = floatval($r['tgt'] ?? 0);
@@ -264,8 +272,8 @@ $mccChem = function (string $reportTable, string $targetTable, string $from, str
 
 $chemScores = []; $chemScoresPrev = [];
 foreach ($chemicalPairs as $cp) {
-    $chemScores[]     = $mccChem($cp[0], $cp[1], $rangeStart, $rangeEnd);
-    $chemScoresPrev[] = $mccChem($cp[0], $cp[1], $prevStartF, $prevEndF);
+    $chemScores[]     = $mccChem($cp[0], $cp[1], $cp[2], $rangeStart, $rangeEnd);
+    $chemScoresPrev[] = $mccChem($cp[0], $cp[1], $cp[2], $prevStartF, $prevEndF);
 }
 $chemActive = array_filter($chemScores, fn($v) => $v > 0);
 $chemicalScore = $chemActive ? round(array_sum($chemActive) / count($chemActive), 1) : 0.0;
