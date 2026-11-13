@@ -211,6 +211,13 @@ foreach ($categories as $key => $cat) {
     $catStatsPrev[$key] = $mccAggregate($cat['table'], $prevStartF, $prevEndF, $cat['filter_sql'] ?? null);
 }
 
+// Exterior washing without ACWP is retained as a dashboard option, but it is
+// intentionally excluded from live counts and score activity.
+if (isset($catStats['normal_ext'])) {
+    $catStats['normal_ext'] = ['trains' => 0, 'rakes' => 0, 'coaches' => 0, 'score' => 0.0];
+    $catStatsPrev['normal_ext'] = ['trains' => 0, 'rakes' => 0, 'coaches' => 0, 'score' => 0.0];
+}
+
 /* ------------------------------------------------------------------ */
 /* 2. OVERALL CHEMICAL SCORE (qty_used vs target qty)                 */
 /* ------------------------------------------------------------------ */
