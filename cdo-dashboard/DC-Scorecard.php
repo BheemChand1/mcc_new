@@ -100,7 +100,7 @@ if ($isFallback) {
             $pId = $param['id'];
             foreach ($shiftsList as $shift) {
                 $sId = $shift['id'];
-                if (isset($reportsMap[$pId][$sId]) && $reportsMap[$pId][$sId] !== null) {
+                if (isset($reportsMap[$pId][$sId]) && is_numeric($reportsMap[$pId][$sId]) && strtoupper(trim((string)$reportsMap[$pId][$sId])) !== 'NA') {
                     $totalScoreSum += intval($reportsMap[$pId][$sId]);
                     $totalRatingCount++;
                 }
@@ -295,7 +295,7 @@ include 'sidebar.php';
                                             foreach ($shiftsList as $shift) {
                                                 $sId = $shift['id'];
                                                 $ratingVal = $sheet['reports_map'][$pId][$sId] ?? null;
-                                                if ($ratingVal !== null && $ratingVal !== '' && $ratingVal !== '-') {
+                                                if ($ratingVal !== null && $ratingVal !== '' && $ratingVal !== '-' && is_numeric($ratingVal) && strtoupper(trim((string)$ratingVal)) !== 'NA') {
                                                     $rowScoreSum += intval($ratingVal);
                                                     $rowRatingCount++;
                                                 }

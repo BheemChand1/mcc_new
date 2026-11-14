@@ -271,8 +271,10 @@ if ($isFallback) {
             'coaches' => $coaches,
             'scores_data' => $scoresData,
             'internal_percentage' => $internalPercentage,
+            'has_internal' => $internalValidCount > 0,
             'external_percentage' => $externalPercentage,
             'watering_percentage' => $wateringPercentage,
+            'has_watering' => $wateringValidCount > 0,
             'has_external' => ($externalParamId && $externalMax > 0),
             'is_fallback' => false,
             'attended_count' => $attendedCount,
@@ -629,7 +631,8 @@ include 'sidebar.php';
                                 </div>
                                 <div class="meta-item">
                                     <span>Total Score :</span>
-                                    <?= number_format(($sheet['internal_percentage'] + $sheet['watering_percentage'] + (!empty($sheet['has_external']) ? $sheet['external_percentage'] : 0)) / (!empty($sheet['has_external']) ? 3 : 2), 1) ?> %
+                                    <?php $scoreParts = []; if (!empty($sheet['has_internal'])) $scoreParts[] = $sheet['internal_percentage']; if (!empty($sheet['has_external'])) $scoreParts[] = $sheet['external_percentage']; if (!empty($sheet['has_watering'])) $scoreParts[] = $sheet['watering_percentage']; ?>
+                                    <?= number_format(count($scoreParts) > 0 ? array_sum($scoreParts) / count($scoreParts) : 0, 1) ?> %
                                 </div>
                             </div>
                         </div>

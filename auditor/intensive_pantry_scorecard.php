@@ -210,7 +210,7 @@ if (!empty($inspectionTokens)) {
                     $val = $scoreMatrix[$sp['id']][$cNo] ?? '';
                     $coachScores[$cNo] = $val;
 
-                    if ($val !== '' && $val !== 'X' && $val !== '-') {
+                    if ($val !== '' && strtoupper(trim((string)$val)) !== 'NA' && $val !== 'X' && $val !== '-') {
                         if (is_numeric($val)) {
                             $itemObtainedSums[$cNo] += intval($val);
                             $itemPossibleSums[$cNo] += 3;
